@@ -83,6 +83,17 @@ class OpenPhishAdapter(BaseThreatIntelAdapter):
         # Community Feed check
         self._sync_community_feed()
 
+        if not self._cached_feed_urls and not self._cached_feed_domains:
+            return ThreatFeedResult(
+                provider=self.provider_id,
+                provider_name=self.provider_name,
+                status="unavailable",
+                matched=False,
+                match_type="none",
+                details="OpenPhish community feed is unavailable or pending initial synchronization.",
+                attribution=self.attribution,
+            )
+
         # 1. Exact URL match
         if sanitized_url in self._cached_feed_urls:
             return ThreatFeedResult(

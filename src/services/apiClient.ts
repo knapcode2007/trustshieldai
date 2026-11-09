@@ -40,7 +40,7 @@ class TrustShieldApiClient {
   private defaultTimeoutMs: number;
 
   constructor() {
-    this.baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+    this.baseUrl = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/+$/, "");
     this.defaultTimeoutMs = 15000;
   }
 

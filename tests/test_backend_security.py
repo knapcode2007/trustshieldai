@@ -6,6 +6,8 @@ module statuses, and failure resilience.
 
 import unittest
 import time
+import socket
+import unittest.mock
 from backend.app.security.ssrf import SSRFValidator, SSRFSecurityException
 from backend.app.core.url_normalizer import URLNormalizer
 from backend.app.core.scanner import ScanEngine, ScanJob
@@ -143,6 +145,32 @@ class TestScanJobLifecycleAndState(unittest.TestCase):
 
     def setUp(self):
         self.engine = ScanEngine(max_workers=2)
+        # Mock DNS resolution for external public domains used in offline/sandboxed lifecycle tests
+        self._orig_getaddrinfo = socket.getaddrinfo
+        def _mock_getaddrinfo(host, port, *args, **kwargs):
+            if host in ("github.com", "example.com", "target.org", "files.example.com"):
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('140.82.121.4', port or 443))]
+            return self._orig_getaddrinfo(host, port, *args, **kwargs)
+        self._dns_patcher = unittest.mock.patch("socket.getaddrinfo", side_effect=_mock_getaddrinfo)
+        self._dns_patcher.start()
+
+    def tearDown(self):
+        self._dns_patcher.stop()
+
+    def test_naked_domain_normalization_in_scan_engine(self):
+        """Regression test: URLs without scheme (e.g. example.com) must normalize to https:// without SSRF scheme violation."""
+        job = self.engine.create_or_get_job("example.com", force_fresh=True)
+        self.assertEqual(job.canonical_url, "https://example.com/")
+        self.assertEqual(job.domain, "example.com")
+        self.assertIn(job.state, ("queued", "running", "completed"))
+
+    def test_naked_private_hosts_still_strictly_blocked(self):
+        """Regression test: Naked host inputs attempting SSRF on internal/loopback destinations are strictly blocked."""
+        forbidden = ["localhost", "127.0.0.1", "169.254.169.254", "metadata.google.internal"]
+        for target in forbidden:
+            with self.subTest(target=target):
+                with self.assertRaises(SSRFSecurityException):
+                    self.engine.create_or_get_job(target, force_fresh=True)
 
     def test_scan_states_and_module_statuses(self):
         """Verifies state transitions from queued -> running -> completed or partial."""

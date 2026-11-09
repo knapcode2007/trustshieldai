@@ -278,6 +278,11 @@ class URLFeatureExtractor:
             # Explanatory properties
             "matched_keywords": all_matches,
             "squatted_brands": squatted_brands,
+            # Backwards compatibility aliases
+            "has_ip": 1 if has_ip else 0,
+            "entropy": url_entropy,
+            "suspicious_keywords": all_matches,
+            "keyword_match_count": len(all_matches),
         }
 
         return features

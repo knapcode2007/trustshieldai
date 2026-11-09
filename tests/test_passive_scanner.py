@@ -30,6 +30,19 @@ from backend.app.security.ssrf import SSRFSecurityException
 class TestPassiveSecurityScanner(unittest.TestCase):
     """Tests passive security header analysis, cookie flag parsing, and redirect defenses."""
 
+    def setUp(self):
+        import socket
+        self._orig_getaddrinfo = socket.getaddrinfo
+        def _mock_getaddrinfo(host, port, *args, **kwargs):
+            if host in ("example.com", "github.com", "target.org"):
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', port or 443))]
+            return self._orig_getaddrinfo(host, port, *args, **kwargs)
+        self._dns_patcher = patch("socket.getaddrinfo", side_effect=_mock_getaddrinfo)
+        self._dns_patcher.start()
+
+    def tearDown(self):
+        self._dns_patcher.stop()
+
     def test_cookie_security_attribute_parsing_and_zero_secret_retention(self):
         """
         Confirms observable cookie security flags (Secure, HttpOnly, SameSite) are parsed,

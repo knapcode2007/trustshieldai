@@ -80,9 +80,17 @@ class ScanEngine:
         """Validates SSRF, canonicalizes URL, handles deduplication, and schedules job."""
         opts = options or {}
 
-        # 1. SSRF and structural validation
-        canonical_url, domain, port, pinned_ip = SSRFValidator.validate_url(raw_url)
-        _, url_hash, _ = URLNormalizer.canonicalize(canonical_url)
+        if not raw_url or not isinstance(raw_url, str) or not raw_url.strip():
+            raise SSRFSecurityException("Target URL cannot be empty.", code="EMPTY_URL")
+
+        # 1. Canonicalize & normalize URL first (prepends https:// if scheme omitted, strips fragments, normalizes slashes)
+        try:
+            canonical_url, url_hash, norm_meta = URLNormalizer.canonicalize(raw_url)
+        except ValueError as e:
+            raise SSRFSecurityException(f"Invalid URL structure: {str(e)}", code="INVALID_SCHEME")
+
+        # 2. Strict SSRF validation and destination IP pinning on canonical URL
+        _, domain, port, pinned_ip = SSRFValidator.validate_url(canonical_url)
 
         with self._lock:
             # Check duplicate / cached scan
@@ -121,6 +129,38 @@ class ScanEngine:
     def get_job(self, scan_id: str) -> Optional[ScanJob]:
         with self._lock:
             return self._jobs.get(scan_id)
+
+    def delete_job(self, scan_id: str) -> bool:
+        """Deletes a scan job and its canonical lookup reference."""
+        with self._lock:
+            if scan_id in self._jobs:
+                job = self._jobs.pop(scan_id)
+                # Clean up hash lookup
+                for h, j_id in list(self._url_hash_to_id.items()):
+                    if j_id == scan_id:
+                        del self._url_hash_to_id[h]
+                return True
+            return False
+
+    def clear_jobs(self) -> None:
+        """Clears all scan jobs and URL hash lookups."""
+        with self._lock:
+            self._jobs.clear()
+            self._url_hash_to_id.clear()
+
+    def list_scans(self, limit: int = 50, verdict: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns completed scan result payloads for legacy frontend compatibility."""
+        with self._lock:
+            all_jobs = list(self._jobs.values())
+
+        # Sort descending by creation
+        all_jobs.sort(key=lambda j: j.created_at, reverse=True)
+
+        completed_results = [j.result for j in all_jobs if j.result]
+        if verdict and verdict != "all":
+            completed_results = [r for r in completed_results if r.get("verdict") == verdict]
+
+        return completed_results[:limit]
 
     def list_history(self, limit: int = 50, offset: int = 0, verdict: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._lock:
@@ -304,9 +344,36 @@ class ScanEngine:
                     "category": "Best Practice"
                 })
 
+            # Calculate honest module coverage
+            ml_cov = 100 if (ml_pred.get("status") == "operational" and ml_pred.get("is_trained")) else 0
+            total_feeds = intel_summary.get("total_providers", 4) or 4
+            operational_feeds = intel_summary.get("operational_count", 0)
+            threat_feeds_cov = int((operational_feeds / total_feeds) * 100)
+            tls_cov = 100 if (tls_summary and job.module_statuses["tls"]["status"] == "completed") else 0
+            headers_cov = 100 if (security_headers and job.module_statuses["headers"]["status"] == "completed") else 0
+            overall_cov = int((100 + ml_cov + tls_cov + headers_cov + threat_feeds_cov) / 5)
+
             calculated_confidence = ml_pred.get("confidence")
             if calculated_confidence is None:
-                calculated_confidence = 0.90 if heuristics_res.findings else 0.85
+                if overall_cov >= 80:
+                    calculated_confidence = 0.90 if heuristics_res.findings else 0.85
+                else:
+                    # Honest confidence scaled with verified coverage breadth
+                    base_conf = 0.50 + (overall_cov / 100.0) * 0.25
+                    calculated_confidence = round(base_conf, 2)
+
+            evidence_items = [
+                {"category": "Host & DNS", "key": "Domain", "value": job.domain, "significance": "Resolved and SSRF validated"},
+                {"category": "Information Theory", "key": "Shannon Entropy", "value": f"{heuristics_res.url_entropy:.4f} bits/char", "significance": "Lexical distribution"}
+            ]
+
+            if ml_cov == 0 or threat_feeds_cov == 0:
+                evidence_items.append({
+                    "category": "Coverage Advisory",
+                    "key": "Evidence Breadth",
+                    "value": f"{overall_cov}% overall pipeline coverage",
+                    "significance": "ML model or threat feeds unconfigured; clean verdict indicates absence of observed signatures rather than guaranteed safety"
+                })
 
             job.result = {
                 "scan_id": job.scan_id,
@@ -322,18 +389,15 @@ class ScanEngine:
                 "security_headers": security_headers,
                 "analysis_coverage": {
                     "lexical": 100,
-                    "ml": 100 if ml_pred.get("status") == "operational" else 0,
-                    "tls": 100 if job.module_statuses["tls"]["status"] != "failed" else 0,
-                    "headers": 100 if job.module_statuses["headers"]["status"] != "failed" else 0,
-                    "threat_feeds": 100,
-                    "overall": 90 if has_partial_failures else 100
+                    "ml": ml_cov,
+                    "tls": tls_cov,
+                    "headers": headers_cov,
+                    "threat_feeds": threat_feeds_cov,
+                    "overall": overall_cov
                 },
                 "threat_feed_matches": [r.to_dict() for r in intel_results],
                 "threat_intel_summary": intel_summary,
-                "evidence": [
-                    {"category": "Host & DNS", "key": "Domain", "value": job.domain, "significance": "Resolved and SSRF validated"},
-                    {"category": "Information Theory", "key": "Shannon Entropy", "value": f"{heuristics_res.url_entropy:.4f} bits/char", "significance": "Lexical distribution"}
-                ],
+                "evidence": evidence_items,
                 "recommendations": recommendations,
                 "created_at": job.created_at
             }

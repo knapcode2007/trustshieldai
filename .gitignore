@@ -1,8 +1,38 @@
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
+
+# Production Builds
 build/
 dist/
+
+# Python Cache & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Coverage
 coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+scratch/
+
+# System & OS
 .DS_Store
+Thumbs.db
 *.log
+
+# Environment variables
 .env*
 !.env.example

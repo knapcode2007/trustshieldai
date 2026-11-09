@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 from urllib.parse import urlparse
 from backend.app.models.schemas import HeuristicFinding, HeuristicResults
-from backend.app.ml.pipeline import PhishingFeatureExtractor
+from backend.app.ml.features import URLFeatureExtractor as PhishingFeatureExtractor
 
 class SecurityHeuristicsEngine:
     """Security rule engine evaluating domain typosquatting, lexical red flags, and structural anomalies."""

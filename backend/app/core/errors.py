@@ -70,6 +70,29 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     payload = format_error_response(code=exc.code, message=exc.message, details=exc.details)
     return JSONResponse(status_code=exc.status_code, content=payload)
 
+async def http_exception_handler(request: Request, exc: Any) -> JSONResponse:
+    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    detail = getattr(exc, "detail", str(exc))
+    if isinstance(detail, dict):
+        code = detail.get("code", f"HTTP_{status_code}")
+        message = detail.get("message", "An HTTP error occurred.")
+        details = {k: v for k, v in detail.items() if k not in ("code", "message")} or None
+    else:
+        code = f"HTTP_{status_code}"
+        message = str(detail) if detail else "An HTTP error occurred."
+        details = None
+    payload = format_error_response(code=code, message=message, details=details)
+    return JSONResponse(status_code=status_code, content=payload)
+
+async def validation_exception_handler(request: Request, exc: Any) -> JSONResponse:
+    errors = exc.errors() if hasattr(exc, "errors") else str(exc)
+    payload = format_error_response(
+        code="VALIDATION_ERROR",
+        message="Request payload failed schema validation.",
+        details=errors
+    )
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content=payload)
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     payload = format_error_response(
         code="UNEXPECTED_SERVER_ERROR",

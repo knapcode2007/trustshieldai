@@ -1,6 +1,6 @@
 import uuid
 import logging
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, status
 from backend.app.core.errors import AppError, ValidationError, ResourceNotFoundError
 from backend.app.models.schemas import (
@@ -8,6 +8,7 @@ from backend.app.models.schemas import (
     ScanJobStateResponse,
     ScanResponse,
     ScanHistoryResponse,
+    GenericActionResponse,
 )
 from backend.app.core.scanner import scan_engine
 from backend.app.security.ssrf import SSRFSecurityException
@@ -113,6 +114,28 @@ async def get_scan_report(scan_id: str):
 
     return job.result
 
+@router.get("/scans", response_model=List[ScanResponse])
+async def list_scans(
+    limit: int = Query(default=50, ge=1, le=100),
+    verdict: Optional[str] = Query(default=None)
+):
+    """Returns completed forensic reports directly for scan history lists."""
+    actual_verdict = verdict if isinstance(verdict, str) else None
+    actual_limit = limit if isinstance(limit, int) else 50
+    return scan_engine.list_scans(limit=actual_limit, verdict=actual_verdict)
+
+@router.delete("/scans/{scan_id}", response_model=GenericActionResponse)
+async def delete_scan(scan_id: str):
+    """Deletes a single scan job and its associated forensic report."""
+    scan_engine.delete_job(scan_id)
+    return {"success": True, "message": "Scan removed from history"}
+
+@router.delete("/scans", response_model=GenericActionResponse)
+async def clear_scans():
+    """Clears all scan jobs and history records."""
+    scan_engine.clear_jobs()
+    return {"success": True, "message": "Scan history cleared"}
+
 @router.get("/history", response_model=ScanHistoryResponse)
 async def get_scan_history(
     limit: int = Query(default=50, ge=1, le=100),
@@ -120,12 +143,15 @@ async def get_scan_history(
     verdict: Optional[str] = Query(default=None)
 ):
     """Returns chronological list of scans with module statuses, states, and pagination."""
-    items = scan_engine.list_history(limit=limit, offset=offset, verdict=verdict)
+    actual_verdict = verdict if isinstance(verdict, str) else None
+    actual_limit = limit if isinstance(limit, int) else 50
+    actual_offset = offset if isinstance(offset, int) else 0
+    items = scan_engine.list_history(limit=actual_limit, offset=actual_offset, verdict=actual_verdict)
     return {
         "items": items,
         "total": len(items),
-        "limit": limit,
-        "offset": offset
+        "limit": actual_limit,
+        "offset": actual_offset
     }
 
 # Backward compatibility direct endpoint

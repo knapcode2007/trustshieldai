@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Query
-from backend.app.core.errors import ValidationError
-from backend.app.models.schemas import ThreatIndicator, ThreatIndicatorCreate
+from fastapi import APIRouter, HTTPException, Query, status
+from backend.app.core.errors import ValidationError, ResourceNotFoundError
+from backend.app.models.schemas import ThreatIndicator, ThreatIndicatorCreate, VerifyThreatIndicatorRequest
 from backend.app.db.supabase import db_manager
+from backend.app.api.v1.endpoints.admin import record_audit_log
 
 router = APIRouter()
 
@@ -55,15 +56,19 @@ async def list_threat_indicators(
     search: Optional[str] = Query(None, description="Search query string")
 ):
     """Retrieve collaborative Threat Intelligence Indicators of Compromise (IOCs)."""
+    actual_type = indicator_type if isinstance(indicator_type, str) else None
+    actual_severity = severity if isinstance(severity, str) else None
+    actual_search = search.lower() if isinstance(search, str) else None
+
     # If Supabase is active, fetch from PostgreSQL table
     client = db_manager.get_client()
     if client:
         try:
             q = client.table("threat_indicators").select("*")
-            if indicator_type:
-                q = q.eq("indicator_type", indicator_type)
-            if severity:
-                q = q.eq("severity", severity)
+            if actual_type:
+                q = q.eq("indicator_type", actual_type)
+            if actual_severity:
+                q = q.eq("severity", actual_severity)
             res = q.execute()
             if res.data:
                 return [ThreatIndicator(**item) for item in res.data]
@@ -72,13 +77,12 @@ async def list_threat_indicators(
 
     # Fallback to local verified baseline
     results = _BASELINE_INDICATORS
-    if indicator_type:
-        results = [i for i in results if i.indicator_type == indicator_type]
-    if severity:
-        results = [i for i in results if i.severity == severity]
-    if search:
-        s = search.lower()
-        results = [i for i in results if s in i.indicator_value.lower() or any(s in t.lower() for t in i.tags)]
+    if actual_type:
+        results = [i for i in results if i.indicator_type == actual_type]
+    if actual_severity:
+        results = [i for i in results if i.severity == actual_severity]
+    if actual_search:
+        results = [i for i in results if actual_search in i.indicator_value.lower() or any(actual_search in t.lower() for t in i.tags)]
     return results
 
 @router.post("/intel/indicators", response_model=ThreatIndicator, status_code=201)
@@ -109,3 +113,41 @@ async def submit_threat_indicator(req: ThreatIndicatorCreate):
 
     _BASELINE_INDICATORS.insert(0, new_ioc)
     return new_ioc
+
+@router.patch("/intel/indicators/{indicator_id}/verify", response_model=ThreatIndicator)
+async def verify_threat_indicator(indicator_id: str, req: VerifyThreatIndicatorRequest):
+    """Verifies or rejects a threat intelligence indicator, logging the administrative decision."""
+    target_item = None
+    for item in _BASELINE_INDICATORS:
+        if item.id == indicator_id:
+            target_item = item
+            break
+
+    if not target_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": f"Threat indicator '{indicator_id}' not found."}
+        )
+
+    target_item.is_verified = bool(req.is_verified)
+
+    # Persist to database if available
+    client = db_manager.get_client()
+    if client:
+        try:
+            client.table("threat_indicators").update({"is_verified": target_item.is_verified}).eq("id", indicator_id).execute()
+        except Exception:
+            pass
+
+    record_audit_log(
+        action="APPROVE_INDICATOR" if req.is_verified else "REJECT_INDICATOR",
+        target_type="indicator",
+        target_id=target_item.id,
+        target_value=target_item.indicator_value,
+        decision="approved" if req.is_verified else "rejected",
+        actor="Admin Moderator",
+        reason=req.reason or "Moderation review decision applied."
+    )
+
+    return target_item
+

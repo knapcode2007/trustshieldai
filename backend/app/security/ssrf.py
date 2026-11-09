@@ -90,6 +90,11 @@ class SSRFValidator:
             raise SSRFSecurityException("URL cannot be empty", code="EMPTY_URL")
 
         clean_url = url.strip()
+        # If no scheme is present and no prohibited protocol prefix exists, normalize to https://
+        prohibited_prefixes = ("javascript:", "data:", "about:", "mailto:", "file:", "dict:", "gopher:", "ftp:")
+        if "://" not in clean_url and not any(clean_url.lower().startswith(p) for p in prohibited_prefixes):
+            clean_url = f"https://{clean_url}"
+
         parsed = urlparse(clean_url)
 
         # 1. Scheme check

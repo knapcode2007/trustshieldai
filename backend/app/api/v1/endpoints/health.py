@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from backend.app.core.config import settings
 from backend.app.models.schemas import HealthResponse, SubsystemHealth
 from backend.app.db.supabase import db_manager
-from backend.app.ml.pipeline import ml_pipeline
+from backend.app.ml.service import ml_service
 
 router = APIRouter()
 
@@ -29,9 +29,13 @@ async def get_system_health():
             version="0.115.0"
         ),
         "ml_engine": SubsystemHealth(
-            status="ready",
-            details="Scikit-Learn phishing lexical inference ready",
-            version=ml_pipeline.model_name
+            status="ready" if ml_service.is_trained else "degraded",
+            details=(
+                "Scikit-Learn phishing model loaded and active"
+                if ml_service.is_trained
+                else "Lexical feature extractor operational (ML artifact pending training)"
+            ),
+            version=ml_service.model_version
         ),
         "database": SubsystemHealth(
             status=db_health["status"],

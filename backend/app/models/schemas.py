@@ -347,3 +347,71 @@ class AuthorizedScanDispatchResponse(BaseModel):
     zap_integration_status: str
     authorized: bool = False
     verified_owner: Optional[str] = None
+
+# --- Threat Indicator Verification Request ---
+class VerifyThreatIndicatorRequest(BaseModel):
+    is_verified: bool
+    reason: Optional[str] = None
+
+# --- Community Reports Schemas ---
+class CommunityReportCreate(BaseModel):
+    target_url: str
+    threat_type: str = "Suspicious Phishing Lure"
+    targeted_brand: Optional[str] = None
+    description: str = "Reported by community contributor"
+    reporter_handle: Optional[str] = "community_member"
+    severity: Literal["low", "medium", "high", "critical"] = "high"
+
+class CommunityReportModerateRequest(BaseModel):
+    status: Literal["verified", "dismissed"]
+    moderator_note: Optional[str] = None
+
+class CommunityReport(BaseModel):
+    id: str
+    target_url: str
+    domain: str
+    threat_type: str
+    targeted_brand: Optional[str] = None
+    description: str
+    reporter_handle: Optional[str] = "community_member"
+    severity: Literal["low", "medium", "high", "critical"]
+    status: Literal["pending", "verified", "dismissed"] = "pending"
+    confirmations_count: int = 1
+    created_at: str
+    moderated_at: Optional[str] = None
+    moderator_note: Optional[str] = None
+
+# --- Watchlist Schemas ---
+class WatchlistItemCreate(BaseModel):
+    target: str
+    label: Optional[str] = None
+    alert_threshold: int = 40
+
+class WatchlistItem(BaseModel):
+    id: str
+    target: str
+    domain: str
+    label: str
+    added_at: str
+    last_scanned_at: Optional[str] = None
+    last_risk_score: Optional[int] = None
+    last_verdict: Optional[Literal["clean", "suspicious", "phishing", "malicious"]] = None
+    alert_threshold: int = 40
+    status: Literal["active", "paused"] = "active"
+
+# --- Admin Audit Log Schemas ---
+class AdminAuditEntry(BaseModel):
+    id: str
+    action: str
+    target_type: Literal["indicator", "report", "watchlist"]
+    target_id: str
+    target_value: str
+    decision: Literal["approved", "rejected", "modified"]
+    timestamp: str
+    actor: str
+    reason: Optional[str] = None
+
+class GenericActionResponse(BaseModel):
+    success: bool = True
+    message: str
+
