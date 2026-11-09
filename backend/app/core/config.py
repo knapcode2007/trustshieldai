@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Any, List, Union
-from pydantic import Field, field_validator, ValidationInfo
+from pydantic import Field, field_validator, ValidationInfo, AliasChoices
 
 try:
     from dotenv import load_dotenv
@@ -85,10 +85,37 @@ try:
             default_factory=lambda: get_default_cors_origins(os.getenv("ENVIRONMENT", "development"))
         )
 
-        # Supabase Persistence & Auth
-        SUPABASE_URL: str = Field(default="", alias="VITE_SUPABASE_URL")
-        SUPABASE_ANON_KEY: str = Field(default="", alias="VITE_SUPABASE_ANON_KEY")
-        SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
+        # Supabase Persistence & Auth (supports Render backend & Vercel frontend naming conventions)
+        SUPABASE_URL: str = Field(
+            default="",
+            validation_alias=AliasChoices("SUPABASE_URL", "VITE_SUPABASE_URL")
+        )
+        SUPABASE_ANON_KEY: str = Field(
+            default="",
+            validation_alias=AliasChoices("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEY")
+        )
+        SUPABASE_SERVICE_ROLE_KEY: str = Field(
+            default="",
+            validation_alias=AliasChoices("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY")
+        )
+
+        @property
+        def is_supabase_configured(self) -> bool:
+            """Determines if a valid Supabase host URL and key are provided."""
+            url = (self.SUPABASE_URL or "").strip()
+            key = (self.SUPABASE_SERVICE_ROLE_KEY or self.SUPABASE_ANON_KEY or "").strip()
+            return bool(
+                url and key
+                and not url.startswith("https://your-project")
+                and "placeholder" not in url
+                and url.startswith("http")
+            )
+
+        @property
+        def is_service_role_configured(self) -> bool:
+            """Determines if an administrative service role key (or modern sb_secret_ key) is provided."""
+            key = (self.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+            return bool(self.is_supabase_configured and key and "placeholder" not in key)
 
         # Threat Intelligence Feeds (Configurable)
         VIRUSTOTAL_API_KEY: str = Field(default="", alias="VIRUSTOTAL_API_KEY")
@@ -139,9 +166,25 @@ except ImportError:
         )
 
         # Supabase Persistence & Auth
-        SUPABASE_URL: str = os.getenv("VITE_SUPABASE_URL", "")
-        SUPABASE_ANON_KEY: str = os.getenv("VITE_SUPABASE_ANON_KEY", "")
-        SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        SUPABASE_URL: str = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
+        SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+        SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_KEY", "")
+
+        @property
+        def is_supabase_configured(self) -> bool:
+            url = (self.SUPABASE_URL or "").strip()
+            key = (self.SUPABASE_SERVICE_ROLE_KEY or self.SUPABASE_ANON_KEY or "").strip()
+            return bool(
+                url and key
+                and not url.startswith("https://your-project")
+                and "placeholder" not in url
+                and url.startswith("http")
+            )
+
+        @property
+        def is_service_role_configured(self) -> bool:
+            key = (self.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+            return bool(self.is_supabase_configured and key and "placeholder" not in key)
 
         # Threat Intelligence Feeds (Configurable)
         VIRUSTOTAL_API_KEY: str = os.getenv("VIRUSTOTAL_API_KEY", "")

@@ -1,13 +1,15 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Depends, status
 from backend.app.models.schemas import (
     WatchlistItem,
     WatchlistItemCreate,
     GenericActionResponse,
 )
+from backend.app.db.supabase import db_manager
+from backend.app.core.auth import get_current_user_optional
 
 router = APIRouter()
 
@@ -40,13 +42,27 @@ _WATCHLIST_ITEMS: List[WatchlistItem] = [
 ]
 
 @router.get("/watchlist", response_model=List[WatchlistItem])
-async def list_watchlist():
+async def list_watchlist(
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """Retrieves all continuously monitored domain and URL watchlist targets."""
+    actual_user = user if isinstance(user, dict) else None
+    user_id = actual_user.get("id") if actual_user else None
+
+    if db_manager.is_configured:
+        db_items = db_manager.list_watchlist(user_id=user_id)
+        if db_items is not None and len(db_items) > 0:
+            return [WatchlistItem(**item) for item in db_items]
+
     return _WATCHLIST_ITEMS
 
 @router.post("/watchlist", response_model=WatchlistItem, status_code=status.HTTP_201_CREATED)
-async def add_to_watchlist(req: WatchlistItemCreate):
+async def add_to_watchlist(
+    req: WatchlistItemCreate,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """Enrolls a new target domain or URL into automated continuous risk monitoring."""
+    actual_user = user if isinstance(user, dict) else None
     if not req.target or not req.target.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -73,18 +89,30 @@ async def add_to_watchlist(req: WatchlistItemCreate):
         status="active"
     )
 
+    user_id = actual_user.get("id") if actual_user else None
+    if db_manager.is_configured:
+        payload = new_item.model_dump() if hasattr(new_item, "model_dump") else new_item.__dict__
+        db_manager.add_watchlist_item(payload, user_id=user_id)
+
     _WATCHLIST_ITEMS.insert(0, new_item)
     return new_item
 
 @router.delete("/watchlist/{item_id}", response_model=GenericActionResponse)
-async def remove_from_watchlist(item_id: str):
+async def remove_from_watchlist(
+    item_id: str,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """Removes a target from continuous automated monitoring."""
     global _WATCHLIST_ITEMS
-    orig_len = len(_WATCHLIST_ITEMS)
+    actual_user = user if isinstance(user, dict) else None
+    user_id = actual_user.get("id") if actual_user else None
+
+    if db_manager.is_configured:
+        db_manager.remove_watchlist_item(item_id, user_id=user_id)
+
     _WATCHLIST_ITEMS = [w for w in _WATCHLIST_ITEMS if w.id != item_id]
-    
+
     return {
         "success": True,
         "message": "Target removed from watchlist"
     }
-

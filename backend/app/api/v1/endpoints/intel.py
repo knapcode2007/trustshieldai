@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Query, Depends, status
 from backend.app.core.errors import ValidationError, ResourceNotFoundError
 from backend.app.models.schemas import ThreatIndicator, ThreatIndicatorCreate, VerifyThreatIndicatorRequest
 from backend.app.db.supabase import db_manager
+from backend.app.core.auth import get_current_user_optional
 from backend.app.api.v1.endpoints.admin import record_audit_log
 
 router = APIRouter()
@@ -61,19 +62,14 @@ async def list_threat_indicators(
     actual_search = search.lower() if isinstance(search, str) else None
 
     # If Supabase is active, fetch from PostgreSQL table
-    client = db_manager.get_client()
-    if client:
-        try:
-            q = client.table("threat_indicators").select("*")
-            if actual_type:
-                q = q.eq("indicator_type", actual_type)
-            if actual_severity:
-                q = q.eq("severity", actual_severity)
-            res = q.execute()
-            if res.data:
-                return [ThreatIndicator(**item) for item in res.data]
-        except Exception:
-            pass
+    if db_manager.is_configured:
+        db_indicators = db_manager.list_threat_indicators(
+            indicator_type=actual_type,
+            severity=actual_severity,
+            search=actual_search
+        )
+        if db_indicators is not None and len(db_indicators) > 0:
+            return [ThreatIndicator(**item) for item in db_indicators]
 
     # Fallback to local verified baseline
     results = _BASELINE_INDICATORS
@@ -86,11 +82,20 @@ async def list_threat_indicators(
     return results
 
 @router.post("/intel/indicators", response_model=ThreatIndicator, status_code=201)
-async def submit_threat_indicator(req: ThreatIndicatorCreate):
+async def submit_threat_indicator(
+    req: ThreatIndicatorCreate,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """Submit a new Indicator of Compromise (IOC) to the collaborative threat intelligence registry."""
+    actual_user = user if isinstance(user, dict) else None
     if not req.indicator_value.strip():
         raise ValidationError("Indicator value cannot be empty", details={"field": "indicator_value"})
-    
+
+    source = (
+        actual_user.get("metadata", {}).get("full_name") or actual_user.get("email") or "Community Contributor"
+        if actual_user else "Community Contributor"
+    )
+
     new_ioc = ThreatIndicator(
         id=str(uuid.uuid4()),
         indicator_value=req.indicator_value.strip(),
@@ -98,25 +103,37 @@ async def submit_threat_indicator(req: ThreatIndicatorCreate):
         threat_category=req.threat_category,
         severity=req.severity,
         confidence=req.confidence,
-        source="Community Contributor",
+        source=source,
         tags=req.tags,
         is_verified=False,
         created_at=datetime.now(timezone.utc).isoformat()
     )
 
-    client = db_manager.get_client()
-    if client:
-        try:
-            client.table("threat_indicators").insert(new_ioc.model_dump()).execute()
-        except Exception:
-            pass
+    if db_manager.is_configured:
+        user_id = actual_user.get("id") if actual_user else None
+        db_manager.create_threat_indicator(
+            new_ioc.model_dump() if hasattr(new_ioc, "model_dump") else new_ioc.__dict__,
+            user_id=user_id
+        )
 
     _BASELINE_INDICATORS.insert(0, new_ioc)
     return new_ioc
 
 @router.patch("/intel/indicators/{indicator_id}/verify", response_model=ThreatIndicator)
-async def verify_threat_indicator(indicator_id: str, req: VerifyThreatIndicatorRequest):
+async def verify_threat_indicator(
+    indicator_id: str,
+    req: VerifyThreatIndicatorRequest,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     """Verifies or rejects a threat intelligence indicator, logging the administrative decision."""
+    actual_user = user if isinstance(user, dict) else None
+    if db_manager.is_configured and actual_user:
+        if actual_user.get("role") not in ("admin", "moderator"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Administrative or moderator privileges required."}
+            )
+
     target_item = None
     for item in _BASELINE_INDICATORS:
         if item.id == indicator_id:
@@ -130,14 +147,11 @@ async def verify_threat_indicator(indicator_id: str, req: VerifyThreatIndicatorR
         )
 
     target_item.is_verified = bool(req.is_verified)
+    actor = actual_user.get("email") if (actual_user and actual_user.get("email")) else "Admin Moderator"
 
     # Persist to database if available
-    client = db_manager.get_client()
-    if client:
-        try:
-            client.table("threat_indicators").update({"is_verified": target_item.is_verified}).eq("id", indicator_id).execute()
-        except Exception:
-            pass
+    if db_manager.is_configured:
+        db_manager.verify_threat_indicator(indicator_id, target_item.is_verified, verified_by=actor)
 
     record_audit_log(
         action="APPROVE_INDICATOR" if req.is_verified else "REJECT_INDICATOR",
@@ -145,9 +159,8 @@ async def verify_threat_indicator(indicator_id: str, req: VerifyThreatIndicatorR
         target_id=target_item.id,
         target_value=target_item.indicator_value,
         decision="approved" if req.is_verified else "rejected",
-        actor="Admin Moderator",
+        actor=actor,
         reason=req.reason or "Moderation review decision applied."
     )
 
     return target_item
-

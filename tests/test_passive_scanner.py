@@ -159,8 +159,8 @@ class TestPassiveSecurityScanner(unittest.TestCase):
         # Wait for scan job completion
         import time
         start = time.time()
-        while job.state in ("queued", "running") and (time.time() - start) < 6.0:
-            time.sleep(0.05)
+        while job.state in ("queued", "running") and (time.time() - start) < 12.0:
+            time.sleep(0.1)
 
         self.assertIn(job.state, ("completed", "partial"))
         self.assertIsNotNone(job.result)

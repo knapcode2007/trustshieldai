@@ -406,6 +406,12 @@ class ScanEngine:
             job.progress_percent = 100
             job.completed_at = datetime.now(timezone.utc).isoformat()
 
+            try:
+                from backend.app.db.supabase import db_manager
+                db_manager.save_scan(job.to_dict())
+            except Exception as db_err:
+                logger.debug(f"Scan persistence deferred: {db_err}")
+
         except SSRFSecurityException as e:
             job.state = "failed"
             job.error_code = e.code

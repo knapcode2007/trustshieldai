@@ -16,6 +16,7 @@ from backend.app.models.schemas import (
     AuthorizedScanDispatchResponse,
 )
 from backend.app.security.authorized_scanner import authorized_scanner
+from backend.app.db.supabase import db_manager
 
 logger = logging.getLogger("trustshield.api.authorized_scan")
 router = APIRouter(prefix="/authorized-scan", tags=["Authorized Domain Security Testing (OWASP ZAP)"])
@@ -33,6 +34,10 @@ async def create_domain_challenge(req: AuthorizedScanChallengeRequest):
         )
 
     challenge_info = authorized_scanner.generate_challenge(req.domain, req.owner_email)
+    if db_manager.is_configured:
+        payload = dict(challenge_info)
+        payload["owner_email"] = req.owner_email
+        db_manager.save_authorized_challenge(payload)
     return challenge_info
 
 @router.post("/verify", response_model=AuthorizedScanVerifyResponse)
@@ -42,6 +47,8 @@ async def verify_domain_ownership(req: AuthorizedScanVerifyRequest):
     If valid, returns an active scan authorization token valid for 7 days.
     """
     verified, message, auth_token = authorized_scanner.verify_ownership(req.domain, req.method)
+    if db_manager.is_configured and verified:
+        db_manager.update_authorized_verification(req.domain, verified, auth_token)
     return {
         "domain": req.domain,
         "verified": verified,

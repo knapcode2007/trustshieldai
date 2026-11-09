@@ -40,6 +40,7 @@ async def get_system_health():
         "database": SubsystemHealth(
             status=db_health["status"],
             provider=db_health.get("provider", "supabase"),
+            latency_ms=db_health.get("latency_ms"),
             details=db_health.get("details")
         ),
         "tls_validator": SubsystemHealth(

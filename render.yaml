@@ -17,7 +17,7 @@ services:
       - key: DEBUG
         value: "false"
       - key: CORS_ORIGINS
-        value: "https://trustshield.vercel.app,http://localhost:5173,http://localhost:3000"
+        value: "https://trustshield.vercel.app,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,http://localhost:4173"
       - key: VIRUSTOTAL_API_KEY
         sync: false
       - key: GOOGLE_SAFE_BROWSING_API_KEY

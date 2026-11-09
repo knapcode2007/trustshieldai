@@ -12,6 +12,7 @@ from backend.app.models.schemas import (
 )
 from backend.app.core.scanner import scan_engine
 from backend.app.security.ssrf import SSRFSecurityException
+from backend.app.db.supabase import db_manager
 
 logger = logging.getLogger("trustshield.api.scans")
 router = APIRouter()
@@ -58,6 +59,10 @@ async def get_scan_status(scan_id: str):
     """
     job = scan_engine.get_job(scan_id)
     if not job:
+        # Check persistent storage
+        persisted = db_manager.get_scan(scan_id)
+        if persisted:
+            return persisted
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -76,6 +81,9 @@ async def get_scan_report(scan_id: str):
     """
     job = scan_engine.get_job(scan_id)
     if not job:
+        persisted = db_manager.get_scan(scan_id)
+        if persisted and persisted.get("result"):
+            return persisted["result"]
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -122,18 +130,23 @@ async def list_scans(
     """Returns completed forensic reports directly for scan history lists."""
     actual_verdict = verdict if isinstance(verdict, str) else None
     actual_limit = limit if isinstance(limit, int) else 50
+    db_scans = db_manager.list_scans(limit=actual_limit, verdict=actual_verdict)
+    if db_scans is not None:
+        return db_scans
     return scan_engine.list_scans(limit=actual_limit, verdict=actual_verdict)
 
 @router.delete("/scans/{scan_id}", response_model=GenericActionResponse)
 async def delete_scan(scan_id: str):
     """Deletes a single scan job and its associated forensic report."""
     scan_engine.delete_job(scan_id)
+    db_manager.delete_scan(scan_id)
     return {"success": True, "message": "Scan removed from history"}
 
 @router.delete("/scans", response_model=GenericActionResponse)
 async def clear_scans():
     """Clears all scan jobs and history records."""
     scan_engine.clear_jobs()
+    db_manager.clear_scans()
     return {"success": True, "message": "Scan history cleared"}
 
 @router.get("/history", response_model=ScanHistoryResponse)
@@ -146,6 +159,11 @@ async def get_scan_history(
     actual_verdict = verdict if isinstance(verdict, str) else None
     actual_limit = limit if isinstance(limit, int) else 50
     actual_offset = offset if isinstance(offset, int) else 0
+
+    db_history = db_manager.list_history(limit=actual_limit, offset=actual_offset, verdict=actual_verdict)
+    if db_history is not None:
+        return db_history
+
     items = scan_engine.list_history(limit=actual_limit, offset=actual_offset, verdict=actual_verdict)
     return {
         "items": items,
