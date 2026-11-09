@@ -1,0 +1,6 @@
+{
+  "name": "TrustShield AI",
+  "description": "Intelligent platform for phishing detection, malicious website assessment, TLS certificate validation, and collaborative threat intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
