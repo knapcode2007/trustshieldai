@@ -36,10 +36,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS Configuration
+# CORS Configuration - Ensure wildcard is never permitted in production
+safe_cors_origins = (
+    [o for o in settings.CORS_ORIGINS if o != "*"]
+    if settings.ENVIRONMENT.lower() == "production"
+    else list(settings.CORS_ORIGINS)
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=safe_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

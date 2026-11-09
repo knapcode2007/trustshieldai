@@ -1,6 +1,7 @@
 import os
-from typing import List
-from pydantic import Field
+import json
+from typing import Any, List, Union
+from pydantic import Field, field_validator, ValidationInfo
 
 try:
     from dotenv import load_dotenv
@@ -8,10 +9,55 @@ try:
 except Exception:
     pass
 
-def _parse_cors_origins() -> List[str]:
-    raw = os.getenv("CORS_ORIGINS", "")
-    if raw.strip():
-        return [o.strip() for o in raw.split(",") if o.strip()]
+def parse_cors_origins_value(v: Any, environment: str = "development") -> List[str]:
+    """
+    Safely parses CORS origins from comma-separated strings, JSON arrays, or native Python lists.
+    Strips trailing slashes and guarantees wildcard '*' is never permitted in production.
+    """
+    origins: List[str] = []
+    
+    if v is None:
+        raw_list = []
+    elif isinstance(v, str):
+        v_trimmed = v.strip()
+        if not v_trimmed:
+            raw_list = []
+        elif v_trimmed.startswith("[") and v_trimmed.endswith("]"):
+            try:
+                parsed = json.loads(v_trimmed)
+                if isinstance(parsed, list):
+                    raw_list = [str(item).strip() for item in parsed if item is not None and str(item).strip()]
+                else:
+                    raw_list = [v_trimmed]
+            except Exception:
+                # If json decoding fails, fall back to comma-separated split
+                raw_list = [item.strip() for item in v_trimmed.strip("[]").split(",") if item.strip()]
+        else:
+            raw_list = [item.strip() for item in v_trimmed.split(",") if item.strip()]
+    elif isinstance(v, (list, tuple, set)):
+        raw_list = [str(item).strip() for item in v if item is not None and str(item).strip()]
+    else:
+        raw_list = [str(v).strip()]
+
+    # Normalize origins (strip trailing slashes, remove duplicates while preserving order)
+    for origin in raw_list:
+        if not origin:
+            continue
+        cleaned = origin.rstrip("/") if (origin != "*" and origin != "/") else origin
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+
+    # In production, strictly remove and reject wildcard "*"
+    if (environment or "development").lower() == "production":
+        origins = [o for o in origins if o != "*"]
+
+    return origins
+
+def get_default_cors_origins(environment: str = "development") -> List[str]:
+    """Provides safe defaults based on deployment environment."""
+    raw_env = (environment or "development").lower()
+    if raw_env == "production":
+        return ["https://trustshield.vercel.app"]
     return [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -22,7 +68,7 @@ def _parse_cors_origins() -> List[str]:
     ]
 
 try:
-    from pydantic_settings import BaseSettings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
 
     class Settings(BaseSettings):
         APP_NAME: str = "TrustShield AI Backend"
@@ -34,8 +80,10 @@ try:
         HOST: str = Field(default="127.0.0.1", alias="FASTAPI_HOST")
         PORT: int = Field(default=8000, alias="FASTAPI_PORT")
         
-        # CORS
-        CORS_ORIGINS: List[str] = Field(default_factory=_parse_cors_origins)
+        # CORS: Annotated as Union[List[str], str] to prevent EnvSettingsSource from forcing JSON decoding
+        CORS_ORIGINS: Union[List[str], str] = Field(
+            default_factory=lambda: get_default_cors_origins(os.getenv("ENVIRONMENT", "development"))
+        )
 
         # Supabase Persistence & Auth
         SUPABASE_URL: str = Field(default="", alias="VITE_SUPABASE_URL")
@@ -46,10 +94,28 @@ try:
         VIRUSTOTAL_API_KEY: str = Field(default="", alias="VIRUSTOTAL_API_KEY")
         GOOGLE_SAFE_BROWSING_API_KEY: str = Field(default="", alias="GOOGLE_SAFE_BROWSING_API_KEY")
 
-        class Config:
-            env_file = ".env"
-            env_file_encoding = "utf-8"
-            extra = "ignore"
+        @field_validator("CORS_ORIGINS", mode="before")
+        @classmethod
+        def parse_cors_origins_before(cls, v: Any, info: ValidationInfo) -> List[str]:
+            env = (info.data.get("ENVIRONMENT") if info.data else None) or os.getenv("ENVIRONMENT", "development")
+            parsed = parse_cors_origins_value(v, environment=env)
+            if not parsed and not v:
+                return get_default_cors_origins(environment=env)
+            return parsed
+
+        @field_validator("CORS_ORIGINS", mode="after")
+        @classmethod
+        def enforce_no_wildcard_in_production(cls, v: List[str], info: ValidationInfo) -> List[str]:
+            env = (info.data.get("ENVIRONMENT") if info.data else None) or os.getenv("ENVIRONMENT", "development")
+            if (env or "development").lower() == "production":
+                return [o for o in v if o != "*"]
+            return v
+
+        model_config = SettingsConfigDict(
+            env_file=".env",
+            env_file_encoding="utf-8",
+            extra="ignore",
+        )
 
 except ImportError:
     from pydantic import BaseModel
@@ -65,7 +131,12 @@ except ImportError:
         PORT: int = int(os.getenv("FASTAPI_PORT", "8000"))
         
         # CORS
-        CORS_ORIGINS: List[str] = _parse_cors_origins()
+        CORS_ORIGINS: List[str] = Field(
+            default_factory=lambda: parse_cors_origins_value(
+                os.getenv("CORS_ORIGINS") or get_default_cors_origins(os.getenv("ENVIRONMENT", "development")),
+                environment=os.getenv("ENVIRONMENT", "development")
+            )
+        )
 
         # Supabase Persistence & Auth
         SUPABASE_URL: str = os.getenv("VITE_SUPABASE_URL", "")
