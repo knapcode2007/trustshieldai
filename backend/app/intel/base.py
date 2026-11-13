@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 class URLQuerySanitizer:
     """
     Strips or redacts sensitive query parameters (e.g. passwords, bearer tokens, API keys)
+    and sensitive URL path components (e.g. password-reset tokens, JWTs, UUIDs, user emails)
     from target URLs before outbound transmission to external threat feeds.
     """
 
@@ -41,39 +42,93 @@ class URLQuerySanitizer:
         re.compile(r"email", re.I),
     ]
 
+    SENSITIVE_PATH_ACTIONS = {
+        "reset-password",
+        "password-reset",
+        "forgot-password",
+        "verify-email",
+        "email-verification",
+        "magic-link",
+        "auth-callback",
+        "invitation",
+        "invite",
+        "otp",
+        "mfa",
+        "2fa",
+    }
+
+    JWT_PATTERN = re.compile(r"^eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}$")
+    UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
     @classmethod
     def sanitize(cls, raw_url: str) -> Tuple[str, bool, List[str]]:
         """
+        Sanitizes sensitive path tokens and query parameters.
         Returns:
             (sanitized_url, was_sanitized, list_of_redacted_param_names)
         """
         try:
             parsed = urllib.parse.urlsplit(raw_url)
-            if not parsed.query:
+            redacted_keys: List[str] = []
+            path_changed = False
+            new_path = parsed.path
+
+            # 1. Sanitize sensitive path segments
+            if parsed.path and parsed.path != "/":
+                segments = parsed.path.split("/")
+                sanitized_segments = []
+                for i, seg in enumerate(segments):
+                    prev_seg = segments[i - 1].lower() if i > 0 else ""
+                    if prev_seg in cls.SENSITIVE_PATH_ACTIONS and seg and seg != "[REDACTED_TOKEN]":
+                        sanitized_segments.append("[REDACTED_TOKEN]")
+                        redacted_keys.append(f"path:{prev_seg}")
+                        path_changed = True
+                    elif cls.JWT_PATTERN.match(seg):
+                        sanitized_segments.append("[REDACTED_JWT]")
+                        redacted_keys.append("path:jwt")
+                        path_changed = True
+                    elif cls.UUID_PATTERN.match(seg):
+                        sanitized_segments.append("[REDACTED_UUID]")
+                        redacted_keys.append("path:uuid")
+                        path_changed = True
+                    elif cls.EMAIL_PATTERN.match(seg):
+                        sanitized_segments.append("[REDACTED_EMAIL]")
+                        redacted_keys.append("path:email")
+                        path_changed = True
+                    else:
+                        sanitized_segments.append(seg)
+                if path_changed:
+                    new_path = "/".join(sanitized_segments)
+
+            # 2. Sanitize sensitive query parameters
+            query_changed = False
+            new_query = parsed.query
+            if parsed.query:
+                query_dict = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+                sanitized_query_pairs = []
+
+                for k, values in query_dict.items():
+                    is_sensitive = any(pattern.search(k) for pattern in cls.SENSITIVE_KEY_PATTERNS)
+                    if is_sensitive:
+                        redacted_keys.append(k)
+                        query_changed = True
+                        for _ in values:
+                            sanitized_query_pairs.append((k, "[REDACTED]"))
+                    else:
+                        for val in values:
+                            sanitized_query_pairs.append((k, val))
+
+                if query_changed:
+                    new_query = urllib.parse.urlencode(sanitized_query_pairs)
+
+            if not path_changed and not query_changed:
                 return raw_url, False, []
 
-            query_dict = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-            redacted_keys = []
-            sanitized_query_pairs = []
-
-            for k, values in query_dict.items():
-                is_sensitive = any(pattern.search(k) for pattern in cls.SENSITIVE_KEY_PATTERNS)
-                if is_sensitive:
-                    redacted_keys.append(k)
-                    for _ in values:
-                        sanitized_query_pairs.append((k, "[REDACTED]"))
-                else:
-                    for val in values:
-                        sanitized_query_pairs.append((k, val))
-
-            if not redacted_keys:
-                return raw_url, False, []
-
-            new_query = urllib.parse.urlencode(sanitized_query_pairs)
             sanitized_url = urllib.parse.urlunsplit((
                 parsed.scheme,
                 parsed.netloc,
-                parsed.path,
+                new_path,
                 new_query,
                 parsed.fragment
             ))

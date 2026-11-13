@@ -11,6 +11,7 @@ from backend.app.intel.google_safe_browsing import GoogleSafeBrowsingAdapter
 from backend.app.intel.urlhaus import URLhausAdapter
 from backend.app.intel.phishtank import PhishTankAdapter
 from backend.app.intel.openphish import OpenPhishAdapter
+from backend.app.intel.virustotal import VirusTotalAdapter
 
 
 class ThreatIntelManager:
@@ -22,9 +23,10 @@ class ThreatIntelManager:
             URLhausAdapter(),
             PhishTankAdapter(),
             OpenPhishAdapter(),
+            VirusTotalAdapter(),
         ]
 
-    def check_all(self, raw_url: str, domain: str, max_workers: int = 4) -> List[ThreatFeedResult]:
+    def check_all(self, raw_url: str, domain: str, max_workers: int = 5) -> List[ThreatFeedResult]:
         """
         Executes lookups across all adapters concurrently with strict error isolation.
         Guarantees that unconfigured or failed providers are never represented as clean.
@@ -64,7 +66,7 @@ class ThreatIntelManager:
         """Calculates risk engine telemetry from threat feed results."""
         matched_results = [r for r in results if r.matched]
         matched_count = len(matched_results)
-        operational_count = len([r for r in results if r.status in ("available", "no_match")])
+        operational_count = len([r for r in results if (r.status == "available" or (r.status == "no_match" and r.confidence > 0))])
         rate_limited_count = len([r for r in results if r.status == "rate_limited"])
         unavailable_count = len([r for r in results if r.status == "unavailable"])
         error_count = len([r for r in results if r.status == "error"])

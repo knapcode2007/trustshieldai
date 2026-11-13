@@ -293,7 +293,11 @@ class ScanEngine:
             # Threat feed score impact:
             intel_impact = 0
             if intel_summary.get("has_exact_url_match"):
-                intel_impact = 60
+                threat_types = intel_summary.get("threat_types", [])
+                if threat_types and all(t.lower() == "suspicious" for t in threat_types):
+                    intel_impact = 40
+                else:
+                    intel_impact = 60
             elif intel_summary.get("has_host_match"):
                 intel_impact = 35
 
@@ -306,7 +310,11 @@ class ScanEngine:
                 # Exact URL threat feed match is a high-confidence positive verdict
                 threat_types = intel_summary.get("threat_types", [])
                 is_phish = any("phish" in t.lower() or "social" in t.lower() for t in threat_types)
-                verdict = "phishing" if is_phish else "malicious"
+                is_suspicious_only = bool(threat_types and all(t.lower() == "suspicious" for t in threat_types))
+                if is_suspicious_only:
+                    verdict = "suspicious"
+                else:
+                    verdict = "phishing" if is_phish else "malicious"
             elif risk_score >= 70:
                 verdict = "phishing" if (heuristics_res.detected_brand_squats or is_high_ml) else "malicious"
             elif risk_score >= 35 or intel_summary.get("has_host_match"):
@@ -346,7 +354,7 @@ class ScanEngine:
 
             # Calculate honest module coverage
             ml_cov = 100 if (ml_pred.get("status") == "operational" and ml_pred.get("is_trained")) else 0
-            total_feeds = intel_summary.get("total_providers", 4) or 4
+            total_feeds = intel_summary.get("total_providers", 5) or 5
             operational_feeds = intel_summary.get("operational_count", 0)
             threat_feeds_cov = int((operational_feeds / total_feeds) * 100)
             tls_cov = 100 if (tls_summary and job.module_statuses["tls"]["status"] == "completed") else 0
