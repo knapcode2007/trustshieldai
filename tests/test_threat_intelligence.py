@@ -149,26 +149,135 @@ class TestGoogleSafeBrowsingAdapter(unittest.TestCase):
 
 
 class TestURLhausAdapter(unittest.TestCase):
-    """Tests abuse.ch URLhaus malware database adapter."""
+    """Tests abuse.ch URLhaus malware & phishing database adapter."""
 
     def setUp(self):
         self.adapter = URLhausAdapter()
 
+    def test_urlhaus_status_unavailable_when_no_api_key(self):
+        """CRITICAL: Missing Auth-Key must NEVER be reported as clean / no_match."""
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": ""}, clear=True):
+            res = self.adapter.lookup("https://example.com/malware.exe", "example.com")
+            self.assertEqual(res.status, "unavailable")
+            self.assertFalse(res.matched)
+            self.assertNotEqual(res.status, "no_match")
+            self.assertIn("not configured", res.details)
+
     @patch("urllib.request.urlopen")
     def test_urlhaus_exact_url_malware_match(self, mock_urlopen):
-        """Validates positive malware URL match."""
+        """Validates positive malware URL match with Auth-Key header verified."""
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.read.return_value = b'{"query_status": "ok", "threat": "malware_download", "url_status": "online", "urlhaus_reference": "https://urlhaus.abuse.ch/url/999/", "tags": ["elf", "mozi"]}'
         mock_resp.__enter__.return_value = mock_resp
         mock_urlopen.return_value = mock_resp
 
-        res = self.adapter.lookup("http://malware-drop.ru/payload.bin", "malware-drop.ru")
-        self.assertEqual(res.status, "available")
-        self.assertTrue(res.matched)
-        self.assertEqual(res.match_type, "exact_url")
-        self.assertEqual(res.threat_type, "malware")
-        self.assertEqual(res.reference_url, "https://urlhaus.abuse.ch/url/999/")
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-secret-auth-key-123"}):
+            res = self.adapter.lookup("http://malware-drop.ru/payload.bin", "malware-drop.ru")
+            self.assertEqual(res.status, "available")
+            self.assertTrue(res.matched)
+            self.assertEqual(res.match_type, "exact_url")
+            self.assertEqual(res.threat_type, "malware")
+            self.assertEqual(res.reference_url, "https://urlhaus.abuse.ch/url/999/")
+
+            # Verify request contained Auth-Key header
+            self.assertTrue(mock_urlopen.called)
+            called_req = mock_urlopen.call_args[0][0]
+            self.assertEqual(called_req.get_header("Auth-key"), "test-secret-auth-key-123")
+
+    @patch("urllib.request.urlopen")
+    def test_urlhaus_exact_url_phishing_match(self, mock_urlopen):
+        """Validates phishing tag classification."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"query_status": "ok", "threat": "credential_theft", "url_status": "online", "urlhaus_reference": "https://urlhaus.abuse.ch/url/888/", "tags": ["phishing", "fake-login"]}'
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("http://phish-login.example.com", "phish-login.example.com")
+            self.assertEqual(res.status, "available")
+            self.assertTrue(res.matched)
+            self.assertEqual(res.threat_type, "phishing")
+
+    @patch("urllib.request.urlopen")
+    def test_urlhaus_host_fallback_with_live_online_payloads(self, mock_urlopen):
+        """Validates fallback to host inspection when host has active, live online payloads."""
+        url_resp = MagicMock()
+        url_resp.status = 200
+        url_resp.read.return_value = b'{"query_status": "no_results"}'
+        url_resp.__enter__.return_value = url_resp
+
+        host_resp = MagicMock()
+        host_resp.status = 200
+        host_resp.read.return_value = b'{"query_status": "ok", "url_count": 5, "urlhaus_reference": "https://urlhaus.abuse.ch/host/bad-host.com/", "urls": [{"threat": "malware_download", "url_status": "online", "tags": ["mirai"]}]}'
+        host_resp.__enter__.return_value = host_resp
+
+        mock_urlopen.side_effect = [url_resp, host_resp]
+
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("http://bad-host.com/new-path", "bad-host.com")
+            self.assertEqual(res.status, "available")
+            self.assertTrue(res.matched)
+            self.assertEqual(res.match_type, "host")
+            self.assertEqual(res.threat_type, "malware_host")
+            self.assertIn("actively serving 1 live malware payload", res.details)
+
+    @patch("urllib.request.urlopen")
+    def test_urlhaus_host_fallback_with_only_offline_payloads_returns_no_match(self, mock_urlopen):
+        """CRITICAL: Historical offline submissions must NOT cause false positives on clean URLs."""
+        url_resp = MagicMock()
+        url_resp.status = 200
+        url_resp.read.return_value = b'{"query_status": "no_results"}'
+        url_resp.__enter__.return_value = url_resp
+
+        host_resp = MagicMock()
+        host_resp.status = 200
+        host_resp.read.return_value = b'{"query_status": "ok", "url_count": 4, "urlhaus_reference": "https://urlhaus.abuse.ch/host/clean-domain.org/", "blacklists": {"spamhaus_dbl": "not listed", "surbl": "not listed"}, "urls": [{"threat": "malware_download", "url_status": "offline", "tags": ["honeypot"]}]}'
+        host_resp.__enter__.return_value = host_resp
+
+        mock_urlopen.side_effect = [url_resp, host_resp]
+
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("http://clean-domain.org/about", "clean-domain.org")
+            self.assertEqual(res.status, "no_match")
+            self.assertFalse(res.matched)
+            self.assertEqual(res.match_type, "none")
+            self.assertIn("0 active online payloads", res.details)
+            self.assertIn("historical takedown(s)", res.details)
+
+    def test_urlhaus_reserved_documentation_domain_root_fast_path(self):
+        """RFC 2606/6761 reserved domains root (e.g. example.com) must return no_match via fast-path."""
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("https://example.com/", "example.com")
+            self.assertEqual(res.status, "no_match")
+            self.assertFalse(res.matched)
+            self.assertEqual(res.match_type, "none")
+            self.assertEqual(res.confidence, 95)
+            self.assertIn("IANA-reserved", res.details)
+
+    def test_urlhaus_example_edu_not_in_reserved_domains(self):
+        """Ensures example.edu is excluded from RFC 2606 reserved documentation domains set."""
+        self.assertNotIn("example.edu", URLhausAdapter.RESERVED_DOCUMENTATION_DOMAINS)
+        self.assertIn("example.com", URLhausAdapter.RESERVED_DOCUMENTATION_DOMAINS)
+        self.assertIn("example.net", URLhausAdapter.RESERVED_DOCUMENTATION_DOMAINS)
+        self.assertIn("example.org", URLhausAdapter.RESERVED_DOCUMENTATION_DOMAINS)
+
+    @patch("urllib.request.urlopen")
+    def test_urlhaus_reserved_domain_malicious_path_can_still_match_exact_url(self, mock_urlopen):
+        """Ensures sub-paths on reserved domains still query exact URL endpoint and match if present."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"query_status": "ok", "threat": "malware_download", "url_status": "online", "urlhaus_reference": "https://urlhaus.abuse.ch/url/777/", "tags": ["mirai"]}'
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("https://example.com/test_drop_check", "example.com")
+            self.assertEqual(res.status, "available")
+            self.assertTrue(res.matched)
+            self.assertEqual(res.match_type, "exact_url")
+            self.assertEqual(res.threat_type, "malware")
 
     @patch("urllib.request.urlopen")
     def test_urlhaus_rate_limit_handling(self, mock_urlopen):
@@ -182,11 +291,30 @@ class TestURLhausAdapter(unittest.TestCase):
             fp=None
         )
 
-        res = self.adapter.lookup("http://test-query.com", "test-query.com")
-        self.assertEqual(res.status, "rate_limited")
-        self.assertFalse(res.matched)
-        self.assertTrue(res.rate_limited)
-        self.assertNotEqual(res.status, "no_match")
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "test-key"}):
+            res = self.adapter.lookup("http://test-query.com", "test-query.com")
+            self.assertEqual(res.status, "rate_limited")
+            self.assertFalse(res.matched)
+            self.assertTrue(res.rate_limited)
+            self.assertNotEqual(res.status, "no_match")
+
+    @patch("urllib.request.urlopen")
+    def test_urlhaus_auth_failure_handling(self, mock_urlopen):
+        """Validates HTTP 401 authentication rejection handling."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://urlhaus-api.abuse.ch",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=None
+        )
+
+        with patch.dict(os.environ, {"URLHAUS_API_KEY": "invalid-key"}):
+            res = self.adapter.lookup("http://test-query.com", "test-query.com")
+            self.assertEqual(res.status, "error")
+            self.assertFalse(res.matched)
+            self.assertIn("authentication failed", res.details)
 
 
 class TestPhishTankAdapter(unittest.TestCase):
@@ -240,6 +368,34 @@ class TestThreatIntelManager(unittest.TestCase):
         self.assertEqual(summary["total_providers"], len(results))
         self.assertIn("operational_count", summary)
         self.assertIn("matched_count", summary)
+
+    @patch("backend.app.intel.google_safe_browsing.GoogleSafeBrowsingAdapter.lookup")
+    def test_fast_path_does_not_bypass_other_security_providers_for_malicious_paths(self, mock_gsb_lookup):
+        """Verifies that if a path on example.com is flagged by another provider, it is NOT bypassed."""
+        # Simulate GSB flagging a malicious path on example.com
+        mock_gsb_lookup.return_value = ThreatFeedResult(
+            provider="google_safe_browsing",
+            provider_name="Google Safe Browsing",
+            status="available",
+            matched=True,
+            match_type="exact_url",
+            threat_type="phishing",
+            confidence=98,
+            details="Confirmed phishing campaign on target path",
+        )
+
+        results = self.manager.check_all("https://example.com/malicious-login", "example.com")
+        summary = self.manager.aggregate_summary(results)
+
+        # Confirm match is aggregated and preserved
+        self.assertTrue(summary["has_exact_url_match"])
+        self.assertGreaterEqual(summary["matched_count"], 1)
+        self.assertIn("phishing", summary["threat_types"])
+
+        # URLhaus returned no_match for the host fallback, but GSB match was preserved
+        gsb_res = next(r for r in results if r.provider == "google_safe_browsing")
+        self.assertTrue(gsb_res.matched)
+        self.assertEqual(gsb_res.threat_type, "phishing")
 
 
 if __name__ == "__main__":

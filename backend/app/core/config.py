@@ -120,6 +120,8 @@ try:
         # Threat Intelligence Feeds (Configurable)
         VIRUSTOTAL_API_KEY: str = Field(default="", alias="VIRUSTOTAL_API_KEY")
         GOOGLE_SAFE_BROWSING_API_KEY: str = Field(default="", alias="GOOGLE_SAFE_BROWSING_API_KEY")
+        URLHAUS_API_KEY: str = Field(default="", alias="URLHAUS_API_KEY")
+        PHISHTANK_API_KEY: str = Field(default="", alias="PHISHTANK_API_KEY")
 
         @field_validator("CORS_ORIGINS", mode="before")
         @classmethod
@@ -189,5 +191,7 @@ except ImportError:
         # Threat Intelligence Feeds (Configurable)
         VIRUSTOTAL_API_KEY: str = os.getenv("VIRUSTOTAL_API_KEY", "")
         GOOGLE_SAFE_BROWSING_API_KEY: str = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
+        URLHAUS_API_KEY: str = os.getenv("URLHAUS_API_KEY", "")
+        PHISHTANK_API_KEY: str = os.getenv("PHISHTANK_API_KEY", "")
 
 settings = Settings()

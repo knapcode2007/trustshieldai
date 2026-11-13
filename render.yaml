@@ -22,6 +22,8 @@ services:
         sync: false
       - key: GOOGLE_SAFE_BROWSING_API_KEY
         sync: false
+      - key: URLHAUS_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
