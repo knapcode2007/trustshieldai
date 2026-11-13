@@ -28,10 +28,18 @@ htmlcov/
 .pytest_cache/
 scratch/
 
+# Local Datasets & ML Training Data
+data/
+backend/app/ml/models/*.joblib
+backend/app/ml/models/*.pkl
+
 # System & OS
 .DS_Store
 Thumbs.db
 *.log
+logs/
+*.jsonl
+*.db
 
 # Environment variables
 .env*

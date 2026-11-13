@@ -1,0 +1,58 @@
+# TrustShield AI - Staging Render Blueprint
+# Isolated staging service definition - does NOT deploy or modify production
+services:
+  - type: web
+    name: trustshield-api-staging
+    runtime: python
+    region: oregon
+    plan: free
+    branch: staging
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ENVIRONMENT
+        value: staging
+      - key: DEBUG
+        value: "false"
+      - key: CORS_ORIGINS
+        value: "https://trustshield-staging.vercel.app,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,http://localhost:4173"
+
+      # --- Staging Access Control & Abuse Protection (Phase 8B) ---
+      - key: STAGING_ACCESS_KEY
+        sync: false  # Configure in Render Dashboard to protect staging endpoints from unauthorized scans
+      - key: STAGING_RATE_LIMIT_PER_MINUTE
+        value: "60"
+
+      # --- Hybrid Shadow Evaluation Configuration ---
+      - key: HYBRID_SHADOW_ENABLED
+        value: "false"  # Keep false by default; enable only after staging container health passes
+      - key: SHADOW_LOG_PATH
+        value: "logs/staging_shadow_eval.jsonl"
+      - key: SHADOW_SAMPLE_RATE
+        value: "1.0"
+      - key: SHADOW_MAX_WORKERS
+        value: "4"
+      - key: SHADOW_QUEUE_MAXSIZE
+        value: "500"
+      - key: RDAP_CACHE_BACKEND
+        value: "sqlite"
+      - key: RDAP_SQLITE_PATH
+        value: "data/staging_rdap_cache.db"
+      - key: RDAP_CACHE_TTL_SECONDS
+        value: "86400"
+
+      # --- Threat Intel Provider API Keys (Sync manually in Render Dashboard) ---
+      - key: VIRUSTOTAL_API_KEY
+        sync: false
+      - key: GOOGLE_SAFE_BROWSING_API_KEY
+        sync: false
+      - key: URLHAUS_API_KEY
+        sync: false
+
+      # --- Database Isolation ---
+      # In-memory staging fallback active: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are omitted
+      # so the staging instance runs 100% in-memory with ZERO connection to production Supabase.

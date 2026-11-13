@@ -15,6 +15,7 @@ from backend.app.core.errors import (
 from backend.app.api.v1.router import api_v1_router
 from backend.app.models.schemas import HealthResponse
 from backend.app.api.v1.endpoints.health import get_system_health
+from backend.app.security.staging_guard import StagingSecurityMiddleware
 
 # Setup logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -26,6 +27,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.ENVIRONMENT} | Version: {settings.APP_VERSION}")
     yield
     logger.info("TrustShield AI Security Microservice shutting down.")
+    try:
+        from backend.app.core.scanner import scan_engine
+        scan_engine.shutdown(wait=False)
+    except Exception:
+        pass
 
 app = FastAPI(
     title="TrustShield AI Engine",
@@ -50,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(StagingSecurityMiddleware)
 
 # Exception Handlers
 app.add_exception_handler(AppError, app_error_handler)

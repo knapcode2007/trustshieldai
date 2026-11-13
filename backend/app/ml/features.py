@@ -6,6 +6,7 @@ suitable for training scikit-learn classifiers (Random Forest, Gradient Boosting
 
 import math
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
@@ -199,19 +200,36 @@ class URLFeatureExtractor:
         # Check IP literal
         has_ip = bool(cls.IP_PATTERN.match(clean_domain))
 
-        # Check Punycode
-        is_punycode = "xn--" in clean_domain
+        # Check Punycode and perform safe Unicode normalization
+        is_punycode_ace = "xn--" in clean_domain
+        has_non_ascii = any(ord(c) > 127 for c in clean_domain)
+        is_punycode = is_punycode_ace or has_non_ascii
 
-        # Calculate character ratios in domain
+        # Decode IDN for natural language entropy and character distribution calculations
+        decoded_domain = clean_domain
+        if is_punycode_ace:
+            try:
+                # RFC 3492 / IDNA 2008 decode with NFC normalization
+                decoded_domain = unicodedata.normalize("NFC", clean_domain.encode("ascii").decode("idna"))
+            except Exception:
+                # Malformed IDN / Punycode falls back safely to raw ASCII
+                decoded_domain = clean_domain
+        elif has_non_ascii:
+            try:
+                decoded_domain = unicodedata.normalize("NFC", clean_domain)
+            except Exception:
+                decoded_domain = clean_domain
+
+        # Calculate character ratios in domain (using decoded domain if IDN)
         domain_len = len(clean_domain)
         digit_count = sum(1 for c in clean_domain if c.isdigit())
         vowel_count = sum(1 for c in clean_domain if c in "aeiou")
         domain_digit_ratio = round(digit_count / max(1, domain_len), 4)
         domain_vowel_ratio = round(vowel_count / max(1, domain_len), 4)
 
-        # Entropies
+        # Entropies (using normalized decoded domain for domain_entropy to avoid Punycode inflation)
         url_entropy = cls.calculate_entropy(url)
-        domain_entropy = cls.calculate_entropy(clean_domain)
+        domain_entropy = cls.calculate_entropy(decoded_domain)
         path_entropy = cls.calculate_entropy(path)
 
         # Keyword matching
@@ -232,8 +250,9 @@ class URLFeatureExtractor:
         # Brand spoofing heuristics
         brand_squatting, brand_in_subdomain, squatted_brands = cls.check_brand_squatting(netloc, path)
 
-        # Patterns
-        consecutive_hyphens = 1 if "--" in full_text else 0
+        # Patterns: Consecutive hyphens check (ignore the protocol 'xn--' prefix in IDNs)
+        text_without_ace = re.sub(r'(^|[\./])xn--', r'\1', full_text)
+        consecutive_hyphens = 1 if "--" in text_without_ace else 0
         has_hex = 1 if bool(cls.HEX_STRING_PATTERN.search(path)) else 0
         is_https = 1 if parsed.scheme == "https" else 0
         is_high_risk_tld = 1 if tld in cls.HIGH_RISK_TLDS else 0

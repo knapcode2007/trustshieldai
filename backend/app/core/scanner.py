@@ -414,6 +414,21 @@ class ScanEngine:
             job.progress_percent = 100
             job.completed_at = datetime.now(timezone.utc).isoformat()
 
+            # Non-blocking observational shadow evaluation (Phase 7C)
+            try:
+                from backend.app.security.shadow_evaluator import shadow_evaluator
+                shadow_evaluator.dispatch(
+                    canonical_url=job.canonical_url,
+                    domain=job.domain,
+                    legacy_verdict=verdict,
+                    legacy_risk_score=risk_score,
+                    intel_results=intel_results,
+                    heuristics_findings=heuristics_res.findings if heuristics_res else [],
+                    ml_prediction=ml_pred,
+                )
+            except Exception as shadow_err:
+                logger.debug(f"Shadow evaluation dispatch deferred: {shadow_err}")
+
             try:
                 from backend.app.db.supabase import db_manager
                 db_manager.save_scan(job.to_dict())
@@ -438,5 +453,14 @@ class ScanEngine:
         Does not fetch or execute page content body.
         """
         return passive_scanner.assess_url(target_url, max_redirects=max_redirects, timeout=3.5).to_dict()
+
+    def shutdown(self, wait: bool = True):
+        """Cleanly drains executor threads and shuts down shadow workers."""
+        self._executor.shutdown(wait=wait)
+        try:
+            from backend.app.security.shadow_evaluator import shadow_evaluator
+            shadow_evaluator.shutdown(wait=wait)
+        except Exception:
+            pass
 
 scan_engine = ScanEngine()

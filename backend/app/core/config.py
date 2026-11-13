@@ -123,6 +123,22 @@ try:
         URLHAUS_API_KEY: str = Field(default="", alias="URLHAUS_API_KEY")
         PHISHTANK_API_KEY: str = Field(default="", alias="PHISHTANK_API_KEY")
 
+        # Experimental Hybrid Decision Shadow Mode (Phase 7C)
+        HYBRID_SHADOW_ENABLED: bool = Field(default=False, alias="HYBRID_SHADOW_ENABLED")
+        SHADOW_LOG_PATH: str = Field(default="logs/hybrid_shadow_eval.jsonl", alias="SHADOW_LOG_PATH")
+        SHADOW_MAX_LOG_BYTES: int = Field(default=10 * 1024 * 1024, alias="SHADOW_MAX_LOG_BYTES")  # 10 MB
+        SHADOW_BACKUP_COUNT: int = Field(default=3, alias="SHADOW_BACKUP_COUNT")
+        SHADOW_RDAP_TIMEOUT: float = Field(default=1.5, alias="SHADOW_RDAP_TIMEOUT")
+        SHADOW_MAX_WORKERS: int = Field(default=2, alias="SHADOW_MAX_WORKERS")
+        SHADOW_QUEUE_MAXSIZE: int = Field(default=100, alias="SHADOW_QUEUE_MAXSIZE")
+        RDAP_CACHE_BACKEND: str = Field(default="memory", alias="RDAP_CACHE_BACKEND")
+        RDAP_SQLITE_PATH: str = Field(default="data/rdap_cache.db", alias="RDAP_SQLITE_PATH")
+        RDAP_CACHE_TTL_SECONDS: int = Field(default=86400, alias="RDAP_CACHE_TTL_SECONDS")
+
+        # Staging Protection & Rate Limiting (Phase 8B)
+        STAGING_ACCESS_KEY: str = Field(default="", alias="STAGING_ACCESS_KEY")
+        STAGING_RATE_LIMIT_PER_MINUTE: int = Field(default=60, alias="STAGING_RATE_LIMIT_PER_MINUTE")
+
         @field_validator("CORS_ORIGINS", mode="before")
         @classmethod
         def parse_cors_origins_before(cls, v: Any, info: ValidationInfo) -> List[str]:
@@ -193,5 +209,19 @@ except ImportError:
         GOOGLE_SAFE_BROWSING_API_KEY: str = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
         URLHAUS_API_KEY: str = os.getenv("URLHAUS_API_KEY", "")
         PHISHTANK_API_KEY: str = os.getenv("PHISHTANK_API_KEY", "")
+
+        # Experimental Hybrid Decision Shadow Mode (Phase 7C)
+        HYBRID_SHADOW_ENABLED: bool = os.getenv("HYBRID_SHADOW_ENABLED", "false").lower() in ("true", "1", "yes")
+        SHADOW_LOG_PATH: str = os.getenv("SHADOW_LOG_PATH", "logs/hybrid_shadow_eval.jsonl")
+        SHADOW_MAX_LOG_BYTES: int = int(os.getenv("SHADOW_MAX_LOG_BYTES", str(10 * 1024 * 1024)))
+        SHADOW_BACKUP_COUNT: int = int(os.getenv("SHADOW_BACKUP_COUNT", "3"))
+        SHADOW_RDAP_TIMEOUT: float = float(os.getenv("SHADOW_RDAP_TIMEOUT", "1.5"))
+        SHADOW_MAX_WORKERS: int = int(os.getenv("SHADOW_MAX_WORKERS", "2"))
+        SHADOW_QUEUE_MAXSIZE: int = int(os.getenv("SHADOW_QUEUE_MAXSIZE", "100"))
+        RDAP_CACHE_BACKEND: str = os.getenv("RDAP_CACHE_BACKEND", "memory")
+        RDAP_SQLITE_PATH: str = os.getenv("RDAP_SQLITE_PATH", "data/rdap_cache.db")
+        RDAP_CACHE_TTL_SECONDS: int = int(os.getenv("RDAP_CACHE_TTL_SECONDS", "86400"))
+        STAGING_ACCESS_KEY: str = os.getenv("STAGING_ACCESS_KEY", "")
+        STAGING_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("STAGING_RATE_LIMIT_PER_MINUTE", "60"))
 
 settings = Settings()
