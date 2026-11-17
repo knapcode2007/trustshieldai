@@ -1,3 +1,4 @@
+import os
 import unittest
 import urllib.request
 import urllib.error
@@ -9,12 +10,12 @@ LIVE_BACKEND_URL = "https://trustshield-api-zsv1.onrender.com"
 def is_live_backend_reachable():
     try:
         req = urllib.request.Request(f"{LIVE_BACKEND_URL}/health", headers={"User-Agent": "Prober/1.0"})
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
+        with urllib.request.urlopen(req, timeout=15.0) as resp:
             return resp.getcode() == 200
     except Exception:
         return False
 
-@unittest.skipUnless(is_live_backend_reachable(), "Live Render backend is not reachable from this test environment")
+@unittest.skipUnless(os.getenv("RUN_LIVE_TESTS") == "true" and is_live_backend_reachable(), "Live Render backend integration tests skipped unless RUN_LIVE_TESTS=true")
 class LiveRenderIntegrationTestCase(unittest.TestCase):
     """End-to-end integration tests executed directly against the live deployed Render backend."""
 

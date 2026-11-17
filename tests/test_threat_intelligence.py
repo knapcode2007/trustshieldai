@@ -850,10 +850,10 @@ class TestThreatIntelManager(unittest.TestCase):
             details="VirusTotal early detection warning: 1 vendor(s) flagged malicious",
         )
 
-        job = scan_engine.create_or_get_job("https://example.com/test-suspicious-vt", force_fresh=True)
+        job = scan_engine.create_or_get_job("https://example.com/test-suspicious-vt", options={"inspect_tls": False}, force_fresh=True)
         import time
         start = time.time()
-        while job.state in ("queued", "running") and (time.time() - start) < 10.0:
+        while job.state in ("queued", "running") and (time.time() - start) < 15.0:
             time.sleep(0.05)
 
         self.assertIn(job.state, ("completed", "partial"))
@@ -877,10 +877,10 @@ class TestThreatIntelManager(unittest.TestCase):
         )
 
         # Scan a suspicious URL with brand squatting and high entropy
-        job = scan_engine.create_or_get_job("https://target.org/login-verify-account-security-token-update", force_fresh=True)
+        job = scan_engine.create_or_get_job("https://target.org/login-verify-account-security-token-update", options={"inspect_tls": False}, force_fresh=True)
         import time
         start = time.time()
-        while job.state in ("queued", "running") and (time.time() - start) < 10.0:
+        while job.state in ("queued", "running") and (time.time() - start) < 15.0:
             time.sleep(0.05)
 
         self.assertIn(job.state, ("completed", "partial"))

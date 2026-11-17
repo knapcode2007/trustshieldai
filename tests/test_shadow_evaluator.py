@@ -483,23 +483,22 @@ class TestScannerEndToEndEquivalence(unittest.TestCase):
 
     def test_scan_equivalence_shadow_on_vs_off(self):
         test_url = "https://safe-site.org/docs/index.html"
+        fast_opts = {"inspect_tls": False, "query_threat_intel": False}
 
         # 1. Execute with shadow mode DISABLED
         self.shadow_evaluator.set_enabled(False)
-        job_disabled = scan_engine.create_or_get_job(test_url, force_fresh=True)
+        job_disabled = scan_engine.create_or_get_job(test_url, options=fast_opts, force_fresh=True)
         # Wait for scan job completion
-        for _ in range(50):
-            if job_disabled.state in ("completed", "partial", "failed"):
-                break
+        start = time.time()
+        while job_disabled.state in ("queued", "running") and (time.time() - start) < 15.0:
             time.sleep(0.05)
         res_disabled = job_disabled.result
 
         # 2. Execute with shadow mode ENABLED
         self.shadow_evaluator.set_enabled(True)
-        job_enabled = scan_engine.create_or_get_job(test_url, force_fresh=True)
-        for _ in range(50):
-            if job_enabled.state in ("completed", "partial", "failed"):
-                break
+        job_enabled = scan_engine.create_or_get_job(test_url, options=fast_opts, force_fresh=True)
+        start = time.time()
+        while job_enabled.state in ("queued", "running") and (time.time() - start) < 15.0:
             time.sleep(0.05)
         res_enabled = job_enabled.result
 

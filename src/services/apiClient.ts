@@ -41,7 +41,7 @@ class TrustShieldApiClient {
 
   constructor() {
     this.baseUrl = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/+$/, "");
-    this.defaultTimeoutMs = 15000;
+    this.defaultTimeoutMs = 45000; // 45s to accommodate Render Free tier cold starts gracefully
   }
 
   private async request<T>(
@@ -108,7 +108,11 @@ class TrustShieldApiClient {
         if (customSignal?.aborted) {
           throw new ApiClientError("Analysis was cancelled by the user", "USER_ABORTED", 499);
         }
-        throw new ApiClientError("Request timed out while contacting TrustShield backend", "REQUEST_TIMEOUT", 408);
+        throw new ApiClientError(
+          "Request timed out while contacting TrustShield backend. The service may be waking from cold sleep (please allow 30-45s and retry).",
+          "REQUEST_TIMEOUT",
+          408
+        );
       }
 
       if (err instanceof ApiClientError) {

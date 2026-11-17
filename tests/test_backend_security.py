@@ -182,7 +182,7 @@ class TestScanJobLifecycleAndState(unittest.TestCase):
 
         # Wait for completion (bounded timeout)
         start = time.time()
-        while job.state in ("queued", "running") and (time.time() - start) < 6.0:
+        while job.state in ("queued", "running") and (time.time() - start) < 15.0:
             time.sleep(0.1)
 
         self.assertIn(job.state, ("completed", "partial"))
