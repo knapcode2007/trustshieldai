@@ -134,20 +134,48 @@ export const SystemHealthView: React.FC = () => {
                 <Cpu className="w-4 h-4 text-amber-400" />
                 <span>scikit-learn Phishing Classifier</span>
               </CardTitle>
-              <Badge variant="clean">ACTIVE</Badge>
+              {health?.subsystems?.ml_engine?.status === "ready" || health?.subsystems?.ml_engine?.status === "online" ? (
+                <Badge variant="clean">ACTIVE</Badge>
+              ) : health?.subsystems?.ml_engine?.status === "offline" ? (
+                <Badge variant="destructive">OFFLINE</Badge>
+              ) : (
+                <Badge variant="outline" className="border-amber-600/40 text-amber-300 bg-amber-950/30">
+                  FEATURE EXTRACTOR ONLY
+                </Badge>
+              )}
             </div>
             <CardDescription className="text-xs">
-              13-dimensional lexical feature extraction vector with Shannon entropy calculations.
+              30-dimensional lexical feature extraction vector with Shannon entropy calculations.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-xs font-mono">
             <div className="flex justify-between text-slate-400">
               <span>Model Artifact:</span>
-              <span className="text-slate-200">TrustShield-RandomForest-PhishLex-v1.0</span>
+              <span className="text-slate-200 truncate max-w-[220px]" title={health?.subsystems?.ml_engine?.version || "TrustShield-RandomForest-PhishLex-v1.0"}>
+                {health?.subsystems?.ml_engine?.version || "TrustShield-RandomForest-PhishLex-v1.0"}
+              </span>
             </div>
             <div className="flex justify-between text-slate-400">
               <span>Inference Pipeline:</span>
-              <span className="text-emerald-400">Ready</span>
+              <span className={
+                health?.subsystems?.ml_engine?.status === "ready" || health?.subsystems?.ml_engine?.status === "online"
+                  ? "text-emerald-400"
+                  : health?.subsystems?.ml_engine?.status === "degraded"
+                  ? "text-amber-400"
+                  : "text-slate-400"
+              }>
+                {health?.subsystems?.ml_engine?.status === "ready" || health?.subsystems?.ml_engine?.status === "online"
+                  ? "Inference Active"
+                  : health?.subsystems?.ml_engine?.status === "degraded"
+                  ? "Inference Standby (Artifact Pending Training)"
+                  : "Standby"}
+              </span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>Status Detail:</span>
+              <span className="text-slate-200 truncate max-w-[220px]" title={health?.subsystems?.ml_engine?.details || "Lexical feature extractor operational (ML artifact pending training)"}>
+                {health?.subsystems?.ml_engine?.details || "Lexical feature extractor operational (ML artifact pending training)"}
+              </span>
             </div>
           </CardContent>
         </Card>

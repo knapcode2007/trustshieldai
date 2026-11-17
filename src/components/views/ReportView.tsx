@@ -247,7 +247,9 @@ export const ReportView: React.FC<ReportViewProps> = ({
                   ? "High-confidence security hazard detected. The destination matches documented credential harvesting signatures, spoofed brand tokens, or malicious infrastructure."
                   : report.verdict === "suspicious"
                   ? "Suspicious indicators identified. Structural or cryptographic anomalies warrant caution prior to credential exchange."
-                  : "Target passed multi-stage heuristics and machine learning classification with no active phishing or domain evasion patterns."}
+                  : report.ml_prediction?.status === "operational" && report.ml_prediction?.is_trained
+                  ? "Target passed multi-stage heuristics and machine learning classification with no active phishing or domain evasion patterns."
+                  : "Target passed multi-stage heuristics, cryptographic TLS inspection, and threat intelligence feeds with no active phishing or domain evasion patterns."}
               </p>
               <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-400 pt-1">
                 <span className="flex items-center gap-1">
@@ -255,7 +257,12 @@ export const ReportView: React.FC<ReportViewProps> = ({
                   <span>Audited: {new Date(report.created_at).toLocaleString()}</span>
                 </span>
                 <span>·</span>
-                <span>Model: {report.ml_prediction?.model || "PhishLex-v1.0"}</span>
+                <span>
+                  Model: {report.ml_prediction?.model || "PhishLex-v1.0"}
+                  {report.ml_prediction?.status === "operational" && report.ml_prediction?.is_trained
+                    ? " (Active)"
+                    : " (Inference Standby)"}
+                </span>
               </div>
             </div>
 
@@ -302,28 +309,70 @@ export const ReportView: React.FC<ReportViewProps> = ({
               <span className="font-semibold text-slate-300 uppercase tracking-wider text-[11px]">
                 Analysis Coverage Scope
               </span>
-              <span className="text-cyan-400 font-bold">100% Comprehensive</span>
+              <span
+                className={`font-bold ${
+                  (report.analysis_coverage?.overall ?? 100) >= 90
+                    ? "text-cyan-400"
+                    : (report.analysis_coverage?.overall ?? 100) >= 70
+                    ? "text-amber-400"
+                    : "text-slate-400"
+                }`}
+              >
+                {report.analysis_coverage?.overall !== undefined
+                  ? `${report.analysis_coverage.overall}% Verified Coverage`
+                  : "100% Comprehensive"}
+              </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] font-mono">
               <div className="p-2 rounded border border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <span className="text-slate-400">Lexical Rules</span>
-                <span className="text-emerald-400 font-bold">100%</span>
+                <span className="text-emerald-400 font-bold">
+                  {report.analysis_coverage?.lexical !== undefined ? `${report.analysis_coverage.lexical}%` : "100%"}
+                </span>
               </div>
               <div className="p-2 rounded border border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <span className="text-slate-400">ML Classifier</span>
-                <span className="text-emerald-400 font-bold">100%</span>
+                <span
+                  className={`font-bold ${
+                    (report.analysis_coverage?.ml ?? 0) > 0 ? "text-emerald-400" : "text-amber-400"
+                  }`}
+                >
+                  {(report.analysis_coverage?.ml ?? 0) > 0
+                    ? `${report.analysis_coverage?.ml}%`
+                    : "0% (Standby)"}
+                </span>
               </div>
               <div className="p-2 rounded border border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <span className="text-slate-400">TLS Handshake</span>
-                <span className="text-emerald-400 font-bold">100%</span>
+                <span
+                  className={`font-bold ${
+                    (report.analysis_coverage?.tls ?? 100) > 0 ? "text-emerald-400" : "text-slate-500"
+                  }`}
+                >
+                  {report.analysis_coverage?.tls !== undefined ? `${report.analysis_coverage.tls}%` : "100%"}
+                </span>
               </div>
               <div className="p-2 rounded border border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <span className="text-slate-400">Security Headers</span>
-                <span className="text-emerald-400 font-bold">100%</span>
+                <span
+                  className={`font-bold ${
+                    (report.analysis_coverage?.headers ?? 100) > 0 ? "text-emerald-400" : "text-slate-500"
+                  }`}
+                >
+                  {report.analysis_coverage?.headers !== undefined ? `${report.analysis_coverage.headers}%` : "100%"}
+                </span>
               </div>
               <div className="p-2 rounded border border-slate-800 bg-slate-950/60 flex items-center justify-between">
                 <span className="text-slate-400">Threat CTI</span>
-                <span className="text-emerald-400 font-bold">100%</span>
+                <span
+                  className={`font-bold ${
+                    (report.analysis_coverage?.threat_feeds ?? 100) >= 80 ? "text-emerald-400" : "text-amber-400"
+                  }`}
+                >
+                  {report.analysis_coverage?.threat_feeds !== undefined
+                    ? `${report.analysis_coverage.threat_feeds}%`
+                    : "100%"}
+                </span>
               </div>
             </div>
           </div>
@@ -340,13 +389,13 @@ export const ReportView: React.FC<ReportViewProps> = ({
             </CardTitle>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono text-slate-400">
-                Architecture: Random Forest Baseline + Gradient Boosting
+                Architecture: 30-Feature Lexical Vector + {report.ml_prediction?.is_trained ? "Trained Random Forest" : "Random Forest (Pipeline Ready)"}
               </span>
               {report.ml_prediction?.status === "operational" && report.ml_prediction?.is_trained ? (
                 <Badge variant="clean">MODEL OPERATIONAL</Badge>
               ) : (
                 <Badge variant="outline" className="border-amber-600/40 text-amber-300 bg-amber-950/30">
-                  TRAINING PIPELINE READY
+                  INFERENCE STANDBY (UNTRAINED)
                 </Badge>
               )}
             </div>
@@ -432,6 +481,29 @@ export const ReportView: React.FC<ReportViewProps> = ({
                   </p>
                 </div>
               </div>
+
+              {report.ml_prediction?.extracted_features && Object.keys(report.ml_prediction.extracted_features).length > 0 && (
+                <div className="p-3 rounded border border-slate-800 bg-slate-900/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-slate-300 font-semibold">
+                      Extracted Lexical Feature Vector (Operational Pipeline):
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400">
+                      30-dim extractor active
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+                    {Object.entries(report.ml_prediction.extracted_features).map(([key, val]) => (
+                      <div key={key} className="p-1.5 rounded bg-slate-950/80 border border-slate-800 flex justify-between items-center">
+                        <span className="text-slate-400 truncate max-w-[130px]" title={key}>{key}:</span>
+                        <span className="text-cyan-300 font-bold ml-1">
+                          {typeof val === "boolean" ? (val ? "true" : "false") : Array.isArray(val) ? (val.length === 0 ? "none" : val.join(", ")) : String(val)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="p-3 rounded border border-slate-800 bg-slate-900/90 font-mono text-[11px] text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>

@@ -52,10 +52,31 @@ export const StatusBanner: React.FC = () => {
               </span>
             </span>
 
-            <span className="flex items-center gap-1.5" title="Scikit-Learn Phishing Model">
+            <span
+              className="flex items-center gap-1.5"
+              title={health?.subsystems?.ml_engine?.details || "Scikit-Learn Phishing Model & Lexical Extractor"}
+            >
               <Cpu className="w-3.5 h-3.5 text-cyan-400" />
               <span>ML Classifier:</span>
-              <span className="font-mono text-emerald-400">Active</span>
+              <span
+                className={`font-mono ${
+                  health?.subsystems?.ml_engine?.status === "ready" || health?.subsystems?.ml_engine?.status === "online"
+                    ? "text-emerald-400"
+                    : health?.subsystems?.ml_engine?.status === "degraded"
+                    ? "text-amber-400"
+                    : health?.subsystems?.ml_engine?.status === "offline"
+                    ? "text-rose-400"
+                    : "text-amber-400"
+                }`}
+              >
+                {health?.subsystems?.ml_engine?.status === "ready" || health?.subsystems?.ml_engine?.status === "online"
+                  ? "Active"
+                  : health?.subsystems?.ml_engine?.status === "degraded"
+                  ? "Standby"
+                  : health?.subsystems?.ml_engine?.status === "offline"
+                  ? "Offline"
+                  : "Standby"}
+              </span>
             </span>
 
             <span className="flex items-center gap-1.5" title="Supabase PostgreSQL Store">
